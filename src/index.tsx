@@ -1,173 +1,247 @@
-import { useCallback, useEffect, useState } from "react";
-import { nanoid } from "nanoid";
-import { Action, ActionPanel, confirmAlert, Form, Icon, List, LocalStorage, popToRoot, PopToRootType, showHUD, showToast, Toast } from "@raycast/api";
-import { ALL_CATEGORIZE, getAllCategorize, getPromptVar, Prompt, State } from "./types";
-import { CreatePromptAction, DeletePromptAction, EmptyView, EditPromptAction, PastePromptAction, LoadPromptAction, } from "./components";
-import { failedToast, successToast } from "./util";
-import { finished } from "stream";
+import { Action, ActionPanel, Color, Icon, List, openExtensionPreferences, Keyboard } from "@raycast/api";
+import { useFetch } from "@raycast/utils";
+import { useMemo, useState } from "react";
+import { FillPlaceholdersForm } from "./components/FillPlaceholdersForm";
+import { KIND_LABELS, PromptHubItem, PromptHubResponse } from "./types";
+import { buildDetailMarkdown, getApiConfig, getKindIcon } from "./utils";
 
 export default function Command() {
-    const [state, setState] = useState<State>({
-        categorize: ALL_CATEGORIZE,
-        isLoading: true,
-        searchText: "",
-        prompts: [],
-        visiblePrompts: [],
-    });
+  const [searchText, setSearchText] = useState("");
+  const [selectedKind, setSelectedKind] = useState("all");
 
-    useEffect(() => {
-        (async () => {
-            const storedPrompts = await LocalStorage.getItem<string>("prompts");
+  const { serverUrl, endpoint, headers } = useMemo(() => getApiConfig(), []);
 
-            if (!storedPrompts) {
-                setState((previous) => ({ ...previous, isLoading: false }));
-                return;
-            }
+  const { isLoading, data, pagination, revalidate, error } = useFetch(
+    (options) => {
+      const qs = new URLSearchParams();
+      const trimmed = searchText.trim();
+      if (trimmed) {
+        qs.set("q", trimmed);
+      }
+      if (selectedKind && selectedKind !== "all") {
+        qs.set("kind", selectedKind);
+      }
+      if (options.cursor) {
+        qs.set("cursor", options.cursor);
+      }
+      qs.set("limit", "30");
+      return `${endpoint}?${qs.toString()}`;
+    },
+    {
+      headers,
+      keepPreviousData: true,
+      mapResult(result: PromptHubResponse) {
+        return {
+          data: result?.items || [],
+          hasMore: Boolean(result?.nextCursor),
+          cursor: result?.nextCursor,
+        };
+      },
+    },
+  );
 
-            try {
-                const prompts: Prompt[] = JSON.parse(storedPrompts);
-                setState((previous) => ({ ...previous, prompts, isLoading: false }));
-            } catch (e) {
-                // can't decode prompts
-                setState((previous) => ({ ...previous, prompts: [], isLoading: false }));
-            }
-        })();
-    }, []);
+  const prompts: PromptHubItem[] = data || [];
 
-    useEffect(() => {
-        (async () => {
-            const categorize = await LocalStorage.getItem<string>("categorize");
+  return (
+    <List
+      isLoading={isLoading}
+      isShowingDetail={true}
+      pagination={pagination}
+      searchText={searchText}
+      onSearchTextChange={setSearchText}
+      searchBarPlaceholder="搜索提示词、正文、标签或生图模型..."
+      searchBarAccessory={
+        <List.Dropdown tooltip="按类型筛选" value={selectedKind} onChange={(newKind) => setSelectedKind(newKind)}>
+          {Object.entries(KIND_LABELS).map(([k, meta]) => (
+            <List.Dropdown.Item key={k} value={k} title={meta.label} />
+          ))}
+        </List.Dropdown>
+      }
+    >
+      {error ? (
+        <List.EmptyView
+          icon={{ source: Icon.Warning, tintColor: Color.Red }}
+          title="无法连接到 PromptHub 服务"
+          description={`无法请求 ${endpoint}。\n请确认本地 Docker 或 Next.js 生产服务已启动，或前往插件设置修改服务地址。`}
+          actions={
+            <ActionPanel>
+              <Action title="重试连接" icon={Icon.ArrowClockwise} onAction={revalidate} />
+              <Action title="打开插件设置" icon={Icon.Gear} onAction={openExtensionPreferences} />
+            </ActionPanel>
+          }
+        />
+      ) : prompts.length === 0 && !isLoading ? (
+        <List.EmptyView
+          icon={Icon.MagnifyingGlass}
+          title="未找到匹配的提示词"
+          description={
+            searchText ? `未找到与「${searchText}」匹配的结果，试试其他关键词` : "PromptHub 库中暂无该类型的内容"
+          }
+          actions={
+            <ActionPanel>
+              <Action title="刷新列表" icon={Icon.ArrowClockwise} onAction={revalidate} />
+              <Action.OpenInBrowser title="在浏览器中打开 PromptHub" url={serverUrl} />
+            </ActionPanel>
+          }
+        />
+      ) : (
+        prompts.map((prompt) => {
+          const hasPlaceholders = prompt.placeholders && prompt.placeholders.length > 0;
+          const displayTitle = prompt.title || prompt.content.slice(0, 30);
+          const subtitle =
+            prompt.models && prompt.models.length > 0
+              ? prompt.models.join(", ")
+              : prompt.tags && prompt.tags.length > 0
+                ? `#${prompt.tags[0]}`
+                : undefined;
 
-            if (!categorize) {
-                setState((previous) => ({ ...previous, isLoading: false }));
-                return;
-            }
+          const accessories: List.Item.Accessory[] = [];
 
-            setState((previous) => ({ ...previous, categorize, isLoading: false }));
-        })();
-    }, []);
+          if (prompt.favorited) {
+            accessories.push({
+              icon: { source: Icon.Star, tintColor: Color.Yellow },
+              tooltip: "已收藏",
+            });
+          }
 
-    useEffect(() => {
-        const result = JSON.stringify(state.prompts)
-        LocalStorage.setItem("prompts", result);
-    }, [state.prompts]);
+          if (hasPlaceholders) {
+            accessories.push({
+              tag: {
+                value: `${prompt.placeholders.length} 变量`,
+                color: Color.Purple,
+              },
+              tooltip: `包含占位符: ${prompt.placeholders.join(", ")}`,
+            });
+          } else {
+            accessories.push({
+              tag: { value: prompt.kind, color: Color.SecondaryText },
+            });
+          }
 
-    useEffect(() => {
-        LocalStorage.setItem("categorize", state.categorize);
-    }, [state.categorize]);
-
-    const handleEdit = useCallback(
-        (id: string, title: string, context: string, categorize: string) => {
-            const newPrompts = [...state.prompts];
-            newPrompts.forEach((p) => {
-                if (p.id == id) {
-                    p.title = title;
-                    p.context = context;
-                    p.categorize = categorize;
-                }
-            })
-            setState((previous) => ({ ...previous, prompts: newPrompts }));
-            successToast("Edit Prompt", title)
-        },
-        [state.prompts, setState]
-    );
-
-    const handleDelete = useCallback(
-        (index: number) => {
-            const deletedPrompt = state.prompts[index]
-            const newPrompts = [...state.prompts];
-            newPrompts.splice(index, 1);
-            setState((previous) => ({ ...previous, prompts: newPrompts }));
-            successToast("Delete Prompt", deletedPrompt.title)
-        },
-        [state.prompts, setState]
-    );
-
-    const filterPrompts = useCallback(() => {
-        if (state.categorize == ALL_CATEGORIZE) {
-            return state.prompts;
-        }
-        return state.prompts.filter((prompt) => prompt.categorize === state.categorize);
-    }, [state.prompts, state.categorize]);
-
-    return (
-        <List
-            isLoading={state.isLoading}
-            searchText={state.searchText}
-            searchBarAccessory={
-                <List.Dropdown
-                    tooltip="Select Prompt List"
-                    value={state.categorize}
-                    onChange={(newValue) => setState((previous) => ({ ...previous, categorize: newValue }))}
-                >
+          return (
+            <List.Item
+              key={prompt.id}
+              icon={getKindIcon(prompt.kind)}
+              title={displayTitle}
+              subtitle={subtitle}
+              accessories={accessories}
+              detail={
+                <List.Item.Detail
+                  markdown={buildDetailMarkdown(prompt, serverUrl)}
+                  metadata={
+                    <List.Item.Detail.Metadata>
+                      <List.Item.Detail.Metadata.Label
+                        title="类型"
+                        text={KIND_LABELS[prompt.kind]?.label || prompt.kind}
+                      />
+                      {prompt.rating !== null && prompt.rating !== undefined && (
+                        <List.Item.Detail.Metadata.Label title="评分" text={"★".repeat(prompt.rating)} />
+                      )}
+                      {prompt.models && prompt.models.length > 0 && (
+                        <List.Item.Detail.Metadata.TagList title="推荐模型">
+                          {prompt.models.map((m) => (
+                            <List.Item.Detail.Metadata.TagList.Item key={m} text={m} color={Color.Blue} />
+                          ))}
+                        </List.Item.Detail.Metadata.TagList>
+                      )}
+                      {prompt.tags && prompt.tags.length > 0 && (
+                        <List.Item.Detail.Metadata.TagList title="标签">
+                          {prompt.tags.map((t) => (
+                            <List.Item.Detail.Metadata.TagList.Item key={t} text={t} color={Color.Green} />
+                          ))}
+                        </List.Item.Detail.Metadata.TagList>
+                      )}
+                      {hasPlaceholders && (
+                        <List.Item.Detail.Metadata.TagList title="占位符">
+                          {prompt.placeholders.map((ph) => {
+                            const defVal = prompt.placeholderDefaults?.[ph];
+                            return (
+                              <List.Item.Detail.Metadata.TagList.Item
+                                key={ph}
+                                text={defVal ? `${ph} (${defVal})` : ph}
+                                color={Color.Purple}
+                              />
+                            );
+                          })}
+                        </List.Item.Detail.Metadata.TagList>
+                      )}
+                      <List.Item.Detail.Metadata.Separator />
+                      {prompt.source?.type && (
+                        <List.Item.Detail.Metadata.Label title="来源类型" text={prompt.source.type} />
+                      )}
+                      {prompt.source?.author && (
+                        <List.Item.Detail.Metadata.Label title="创作者" text={prompt.source.author} />
+                      )}
+                      {prompt.source?.url && (
+                        <List.Item.Detail.Metadata.Link
+                          title="来源链接"
+                          target={prompt.source.url}
+                          text={prompt.source.url}
+                        />
+                      )}
+                      <List.Item.Detail.Metadata.Label
+                        title="创建时间"
+                        text={new Date(prompt.createdAt).toLocaleDateString()}
+                      />
+                    </List.Item.Detail.Metadata>
+                  }
+                />
+              }
+              actions={
+                <ActionPanel>
+                  {hasPlaceholders ? (
                     <>
-                        <List.Dropdown.Item title="All" value={ALL_CATEGORIZE} />
-                        {
-                            Array.from(getAllCategorize(state.prompts)).map((v) => {
-                                return <List.Dropdown.Item key={v} title={v} value={v} />
-                            })
-                        }
+                      <Action.Push
+                        title="Fill Placeholders & Paste"
+                        icon={Icon.Window}
+                        target={<FillPlaceholdersForm prompt={prompt} serverUrl={serverUrl} />}
+                      />
+                      <Action.Paste
+                        title="Paste Raw Template"
+                        content={prompt.content}
+                        shortcut={{ modifiers: ["cmd", "shift"], key: "v" }}
+                      />
+                      <Action.CopyToClipboard
+                        title="Copy Raw Template"
+                        content={prompt.content}
+                        shortcut={{ modifiers: ["cmd"], key: "c" }}
+                      />
                     </>
-                </List.Dropdown>
-            }
-            filtering={true}
-            onSearchTextChange={(newValue) => {
-                setState((previous) => ({ ...previous, searchText: newValue }));
-            }}
-            isShowingDetail={true}
-        >
-            <EmptyView prompts={filterPrompts()} searchText={state.searchText} state={state} setState={setState} />
-            {
-                filterPrompts().map((prompt, index) => (
-                    <List.Item
-                        key={prompt.id}
-                        icon={getPromptVar(prompt.context).size > 0 ? Icon.Window : Icon.Text}
-                        title={prompt.title}
-                        actions={
-                            <ActionPanel>
-                                <PastePromptAction prompt={prompt} />
-                                <ActionPanel.Section>
-                                    <CreatePromptAction state={state} setState={setState} />
-                                    <DeletePromptAction onDelete={() => handleDelete(index)} />
-                                    <EditPromptAction prompt={prompt} onEdit={handleEdit} />
-                                    <LoadPromptAction state={state} setState={setState} />
-                                    <Action.Push
-                                        icon="📚"
-                                        title="Json Config"
-                                        target={
-                                            <Form
-                                                actions={
-                                                    <ActionPanel>
-                                                        <Action.SubmitForm title="Update Config"
-                                                            onSubmit={(values) => {
-                                                                try {
-                                                                    const prompts: Prompt[] = JSON.parse(values.prompts);
-                                                                    setState((previous) => ({ ...previous, prompts, isLoading: false }));
-                                                                    successToast("Update Config Success", "")
-                                                                } catch (e) {
-                                                                    // can't decode prompts
-                                                                    setState((previous) => ({ ...previous, prompts: [], isLoading: false }));
-                                                                    failedToast("Update Config Failed", `${e}`)
-                                                                } finally {
-                                                                    popToRoot()
-                                                                }
-                                                            }}
-                                                        />
-                                                    </ActionPanel>
-                                                }
-                                            >
-                                                <Form.TextArea id="prompts" defaultValue={JSON.stringify(state.prompts)} />
-                                            </Form>
-                                        } />
-                                </ActionPanel.Section>
-                            </ActionPanel>
-                        }
-                        detail={
-                            <List.Item.Detail markdown={prompt.context} />
-                        }
+                  ) : (
+                    <>
+                      <Action.Paste title="Paste into Active App" icon={Icon.Clipboard} content={prompt.content} />
+                      <Action.CopyToClipboard
+                        title="Copy to Clipboard"
+                        icon={Icon.CopyClipboard}
+                        content={prompt.content}
+                        shortcut={{ modifiers: ["cmd"], key: "c" }}
+                      />
+                    </>
+                  )}
+                  <ActionPanel.Section>
+                    <Action.OpenInBrowser
+                      title="Open in PromptHub"
+                      icon={Icon.Globe}
+                      url={`${serverUrl}/p/${prompt.id}/use`}
+                      shortcut={Keyboard.Shortcut.Common.Open}
                     />
-                ))
-            }
-        </List >
-    );
+                    {prompt.source?.url && (
+                      <Action.OpenInBrowser title="Open Source Link" icon={Icon.Link} url={prompt.source.url} />
+                    )}
+                    <Action
+                      title="Reload Prompts"
+                      icon={Icon.ArrowClockwise}
+                      onAction={revalidate}
+                      shortcut={Keyboard.Shortcut.Common.Refresh}
+                    />
+                    <Action title="Open Preferences" icon={Icon.Gear} onAction={openExtensionPreferences} />
+                  </ActionPanel.Section>
+                </ActionPanel>
+              }
+            />
+          );
+        })
+      )}
+    </List>
+  );
 }
