@@ -9,7 +9,25 @@ export default function Command() {
   const [searchText, setSearchText] = useState("");
   const [selectedKind, setSelectedKind] = useState("all");
 
-  const { serverUrl, endpoint, headers } = useMemo(() => getApiConfig(), []);
+  const [fallbackHost, setFallbackHost] = useState<string | null>(null);
+
+  const baseConfig = useMemo(() => getApiConfig(), []);
+  const serverUrl = useMemo(() => {
+    if (!fallbackHost) return baseConfig.serverUrl;
+    try {
+      const u = new URL(baseConfig.serverUrl);
+      u.hostname = fallbackHost;
+      return u.toString().replace(/\/$/, "");
+    } catch {
+      return baseConfig.serverUrl;
+    }
+  }, [baseConfig.serverUrl, fallbackHost]);
+
+  const endpoint = useMemo(() => {
+    return baseConfig.apiKey ? `${serverUrl}/api/v1/prompts` : `${serverUrl}/library-items`;
+  }, [baseConfig.apiKey, serverUrl]);
+
+  const headers = baseConfig.headers;
 
   const { isLoading, data, pagination, revalidate, error } = useFetch(
     (options) => {
@@ -30,9 +48,19 @@ export default function Command() {
     {
       headers,
       keepPreviousData: true,
+      onError(err) {
+        console.error("[PromptHelper] useFetch error:", err);
+      },
+      async parseResponse(response): Promise<PromptHubResponse> {
+        if (!response.ok) {
+          const text = await response.text().catch(() => "");
+          throw new Error(`HTTP ${response.status} ${response.statusText}${text ? `: ${text}` : ""}`);
+        }
+        return (await response.json()) as PromptHubResponse;
+      },
       mapResult(result: PromptHubResponse) {
         return {
-          data: result?.items || [],
+          data: (result?.items || []) as PromptHubItem[],
           hasMore: Boolean(result?.nextCursor),
           cursor: result?.nextCursor,
         };
@@ -41,6 +69,17 @@ export default function Command() {
   );
 
   const prompts: PromptHubItem[] = data || [];
+
+  const currentHostname = useMemo(() => {
+    try {
+      return new URL(serverUrl).hostname;
+    } catch {
+      return "127.0.0.1";
+    }
+  }, [serverUrl]);
+
+  const alternateHost =
+    currentHostname === "127.0.0.1" ? "localhost" : currentHostname === "localhost" ? "127.0.0.1" : null;
 
   return (
     <List
@@ -62,10 +101,23 @@ export default function Command() {
         <List.EmptyView
           icon={{ source: Icon.Warning, tintColor: Color.Red }}
           title="无法连接到 PromptHub 服务"
-          description={`无法请求 ${endpoint}。\n请确认本地 Docker 或 Next.js 生产服务已启动，或前往插件设置修改服务地址。`}
+          description={`请求端点: ${endpoint}\n错误原因: ${error.name ? `[${error.name}] ` : ""}${error.message || String(error)}\n\n排查建议：\n1. 请确认本地 Next.js 服务已启动（http://127.0.0.1:3210）\n2. 若开启了科学上网/代理工具，请确认 127.0.0.1 / localhost 在代理软件中已设为直连旁路\n3. 可尝试点击下方「切换为 ${alternateHost || "备用地址"} 尝试」`}
           actions={
             <ActionPanel>
               <Action title="重试连接" icon={Icon.ArrowClockwise} onAction={revalidate} />
+              {alternateHost && (
+                <Action
+                  title={`切换为 ${alternateHost} 尝试`}
+                  icon={Icon.Network}
+                  onAction={() => setFallbackHost(alternateHost)}
+                />
+              )}
+              <Action.CopyToClipboard
+                title="复制错误详情"
+                icon={Icon.CopyClipboard}
+                content={`Endpoint: ${endpoint}\nError: ${error.name}: ${error.message}\nStack: ${error.stack || ""}`}
+              />
+              <Action.OpenInBrowser title="在浏览器中测试打开 PromptHub" url={serverUrl} />
               <Action title="打开插件设置" icon={Icon.Gear} onAction={openExtensionPreferences} />
             </ActionPanel>
           }

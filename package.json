@@ -10,10 +10,16 @@
     "Developer Tools"
   ],
   "license": "MIT",
+  "keywords": [
+    "prompt",
+    "helper",
+    "prompthub",
+    "提示词"
+  ],
   "commands": [
     {
       "name": "index",
-      "title": "Search Prompts",
+      "title": "Prompt Helper",
       "subtitle": "PromptHub",
       "description": "Search, fill variables, and paste prompts from PromptHub",
       "mode": "view"
