@@ -40,5 +40,20 @@ vi.mock("@raycast/api", () => {
     showHUD: vi.fn(),
     popToRoot: vi.fn(),
     openExtensionPreferences: vi.fn(),
+    LocalStorage: (() => {
+      const storage = new Map<string, string>();
+      return {
+        getItem: vi.fn(async (key: string) => storage.get(key) ?? null),
+        setItem: vi.fn(async (key: string, val: string) => {
+          storage.set(key, String(val));
+        }),
+        removeItem: vi.fn(async (key: string) => {
+          storage.delete(key);
+        }),
+        clear: vi.fn(async () => {
+          storage.clear();
+        }),
+      };
+    })(),
   };
 });

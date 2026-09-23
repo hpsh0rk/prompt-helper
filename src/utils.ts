@@ -1,5 +1,132 @@
-import { Icon, getPreferenceValues } from "@raycast/api";
+import { Icon, LocalStorage, getPreferenceValues } from "@raycast/api";
+import nodeFetch from "node-fetch";
 import { Preferences, PromptHubItem } from "./types";
+
+function getFetch() {
+  if (typeof globalThis.fetch !== "undefined") {
+    return globalThis.fetch;
+  }
+  return nodeFetch as unknown as typeof globalThis.fetch;
+}
+
+export const RECENT_PROMPTS_KEY = "prompt_helper_recent_prompts";
+const MAX_RECENT_PROMPTS = 30;
+
+export async function getRecentPrompts(): Promise<PromptHubItem[]> {
+  try {
+    const raw = await LocalStorage.getItem<string>(RECENT_PROMPTS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed as PromptHubItem[];
+    }
+    return [];
+  } catch (err) {
+    console.error("[PromptHelper] failed to get recent prompts:", err);
+    return [];
+  }
+}
+
+export async function recordPromptUsage(item: PromptHubItem): Promise<PromptHubItem[]> {
+  try {
+    const current = await getRecentPrompts();
+    const filtered = current.filter((p) => p.id !== item.id);
+    const updated = [item, ...filtered].slice(0, MAX_RECENT_PROMPTS);
+    await LocalStorage.setItem(RECENT_PROMPTS_KEY, JSON.stringify(updated));
+    return updated;
+  } catch (err) {
+    console.error("[PromptHelper] failed to record prompt usage:", err);
+    return [];
+  }
+}
+
+export async function clearRecentPrompts(): Promise<void> {
+  try {
+    await LocalStorage.removeItem(RECENT_PROMPTS_KEY);
+  } catch (err) {
+    console.error("[PromptHelper] failed to clear recent prompts:", err);
+  }
+}
+
+export async function updateRecentPromptFavorite(promptId: string, favorited: boolean): Promise<PromptHubItem[]> {
+  try {
+    const current = await getRecentPrompts();
+    let hasChanged = false;
+    const updated = current.map((p) => {
+      if (p.id === promptId && p.favorited !== favorited) {
+        hasChanged = true;
+        return { ...p, favorited };
+      }
+      return p;
+    });
+    if (hasChanged) {
+      await LocalStorage.setItem(RECENT_PROMPTS_KEY, JSON.stringify(updated));
+    }
+    return updated;
+  } catch {
+    return [];
+  }
+}
+
+export async function toggleFavoritePrompt(
+  serverUrl: string,
+  apiKey: string | undefined,
+  promptId: string,
+  currentFavorited?: boolean,
+): Promise<{ favorited: boolean }> {
+  const f = getFetch();
+  if (apiKey) {
+    if (currentFavorited) {
+      const url = `${serverUrl}/api/v1/favorites?prompt_id=${encodeURIComponent(promptId)}`;
+      const res = await f(url, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          Accept: "application/json",
+        },
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`HTTP ${res.status} ${res.statusText}${text ? `: ${text}` : ""}`);
+      }
+      const data = (await res.json()) as { favorited: boolean };
+      return { favorited: Boolean(data.favorited) };
+    } else {
+      const url = `${serverUrl}/api/v1/favorites`;
+      const res = await f(url, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({ prompt_id: promptId }),
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`HTTP ${res.status} ${res.statusText}${text ? `: ${text}` : ""}`);
+      }
+      const data = (await res.json()) as { favorited: boolean };
+      return { favorited: Boolean(data.favorited) };
+    }
+  } else {
+    const url = `${serverUrl}/library-items/favorite`;
+    const res = await f(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({ prompt_id: promptId }),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`HTTP ${res.status} ${res.statusText}${text ? `: ${text}` : ""}`);
+    }
+    const data = (await res.json()) as { favorited: boolean };
+    return { favorited: Boolean(data.favorited) };
+  }
+}
 
 export function getApiConfig() {
   const prefs = getPreferenceValues<Preferences>();

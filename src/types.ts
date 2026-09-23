@@ -30,6 +30,19 @@ export interface Preferences {
   apiKey?: string;
 }
 
+export type FilterMode = "all" | "favorites" | "recent" | "image" | "text" | "code" | "video" | "audio";
+
+export const FILTER_OPTIONS: { id: FilterMode; label: string; icon: string }[] = [
+  { id: "all", label: "全部提示词", icon: "list" },
+  { id: "favorites", label: "⭐ 我的收藏", icon: "star" },
+  { id: "recent", label: "🕒 最近使用", icon: "clock" },
+  { id: "image", label: "生图 (Image)", icon: "image" },
+  { id: "text", label: "文本 (Text)", icon: "document" },
+  { id: "code", label: "代码 (Code)", icon: "code" },
+  { id: "video", label: "视频 (Video)", icon: "video" },
+  { id: "audio", label: "音频 (Audio)", icon: "music" },
+];
+
 export const KIND_LABELS: Record<string, { label: string; icon: string }> = {
   all: { label: "全部类型", icon: "list" },
   image: { label: "生图 (Image)", icon: "image" },

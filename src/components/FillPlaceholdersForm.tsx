@@ -1,6 +1,7 @@
 import { Action, ActionPanel, Clipboard, Form, Icon, popToRoot, showHUD, showToast, Toast } from "@raycast/api";
 import { useCallback, useMemo } from "react";
 import { PromptHubItem, extractAllPlaceholders, substitutePlaceholders } from "../types";
+import { recordPromptUsage } from "../utils";
 
 interface Props {
   prompt: PromptHubItem;
@@ -28,6 +29,7 @@ export function FillPlaceholdersForm({ prompt }: Props) {
 
       const rendered = substitutePlaceholders(prompt.content, finalValues);
       await Clipboard.paste(rendered);
+      await recordPromptUsage(prompt);
       await showHUD("✨ 已替换参数并粘贴至当前应用");
       popToRoot();
     },
@@ -45,6 +47,7 @@ export function FillPlaceholdersForm({ prompt }: Props) {
 
       const rendered = substitutePlaceholders(prompt.content, finalValues);
       await Clipboard.copy(rendered);
+      await recordPromptUsage(prompt);
       await showToast({
         style: Toast.Style.Success,
         title: "已复制渲染后提示词",
