@@ -1,9 +1,17 @@
 import { Action, ActionPanel, Color, Icon, List, openExtensionPreferences, Keyboard } from "@raycast/api";
-import { useFetch } from "@raycast/utils";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { FillPlaceholdersForm } from "./components/FillPlaceholdersForm";
 import { KIND_LABELS, PromptHubItem, PromptHubResponse } from "./types";
 import { buildDetailMarkdown, getApiConfig, getKindIcon } from "./utils";
+
+// 兼容老版本 Node / Raycast 环境缺失的 Web API 全局变量
+const globalScope = globalThis as Record<string, unknown>;
+if (typeof globalScope.Request === "undefined") {
+  globalScope.Request = class Request {};
+}
+if (typeof globalScope.Response === "undefined") {
+  globalScope.Response = class Response {};
+}
 
 export default function Command() {
   const [searchText, setSearchText] = useState("");
@@ -29,46 +37,52 @@ export default function Command() {
 
   const headers = baseConfig.headers;
 
-  const { isLoading, data, pagination, revalidate, error } = useFetch(
-    (options) => {
-      const qs = new URLSearchParams();
-      const trimmed = searchText.trim();
-      if (trimmed) {
-        qs.set("q", trimmed);
-      }
-      if (selectedKind && selectedKind !== "all") {
-        qs.set("kind", selectedKind);
-      }
-      if (options.cursor) {
-        qs.set("cursor", options.cursor);
-      }
-      qs.set("limit", "30");
-      return `${endpoint}?${qs.toString()}`;
-    },
-    {
-      headers,
-      keepPreviousData: true,
-      onError(err) {
-        console.error("[PromptHelper] useFetch error:", err);
-      },
-      async parseResponse(response): Promise<PromptHubResponse> {
-        if (!response.ok) {
-          const text = await response.text().catch(() => "");
-          throw new Error(`HTTP ${response.status} ${response.statusText}${text ? `: ${text}` : ""}`);
+  const [prompts, setPrompts] = useState<PromptHubItem[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  const fetchPrompts = useCallback(
+    async (cursor?: string | null) => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const qs = new URLSearchParams();
+        const trimmed = searchText.trim();
+        if (trimmed) {
+          qs.set("q", trimmed);
         }
-        return (await response.json()) as PromptHubResponse;
-      },
-      mapResult(result: PromptHubResponse) {
-        return {
-          data: (result?.items || []) as PromptHubItem[],
-          hasMore: Boolean(result?.nextCursor),
-          cursor: result?.nextCursor,
-        };
-      },
+        if (selectedKind && selectedKind !== "all") {
+          qs.set("kind", selectedKind);
+        }
+        if (cursor) {
+          qs.set("cursor", cursor);
+        }
+        qs.set("limit", "30");
+
+        const url = `${endpoint}?${qs.toString()}`;
+        const res = await fetch(url, { headers });
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          throw new Error(`HTTP ${res.status} ${res.statusText}${text ? `: ${text}` : ""}`);
+        }
+        const json = (await res.json()) as PromptHubResponse;
+        setPrompts((prev) => (cursor ? [...prev, ...(json.items || [])] : json.items || []));
+        setNextCursor(json.nextCursor || null);
+      } catch (err: unknown) {
+        const errorObj = err instanceof Error ? err : new Error(String(err));
+        console.error("[PromptHelper] fetch error:", errorObj);
+        setError(errorObj);
+      } finally {
+        setIsLoading(false);
+      }
     },
+    [endpoint, headers, searchText, selectedKind],
   );
 
-  const prompts: PromptHubItem[] = data || [];
+  useEffect(() => {
+    fetchPrompts();
+  }, [fetchPrompts]);
 
   const currentHostname = useMemo(() => {
     try {
@@ -85,7 +99,15 @@ export default function Command() {
     <List
       isLoading={isLoading}
       isShowingDetail={true}
-      pagination={pagination}
+      pagination={{
+        pageSize: 30,
+        hasMore: Boolean(nextCursor),
+        onLoadMore: () => {
+          if (nextCursor && !isLoading) {
+            fetchPrompts(nextCursor);
+          }
+        },
+      }}
       searchText={searchText}
       onSearchTextChange={setSearchText}
       searchBarPlaceholder="搜索提示词、正文、标签或生图模型..."
@@ -100,11 +122,11 @@ export default function Command() {
       {error ? (
         <List.EmptyView
           icon={{ source: Icon.Warning, tintColor: Color.Red }}
-          title="无法连接到 PromptHub 服务"
-          description={`请求端点: ${endpoint}\n错误原因: ${error.name ? `[${error.name}] ` : ""}${error.message || String(error)}\n\n排查建议：\n1. 请确认本地 Next.js 服务已启动（http://127.0.0.1:3210）\n2. 若开启了科学上网/代理工具，请确认 127.0.0.1 / localhost 在代理软件中已设为直连旁路\n3. 可尝试点击下方「切换为 ${alternateHost || "备用地址"} 尝试」`}
+          title={error.name ? `[${error.name}] ${error.message}` : "无法连接到 PromptHub 服务"}
+          description={`请求端点: ${endpoint}\n\n排查建议：\n1. 请确认本地 Next.js 服务已启动（http://127.0.0.1:3210）\n2. 若开启了科学上网/代理工具，请确认 127.0.0.1 / localhost 在代理软件中已设为直连旁路\n3. 可尝试点击下方「切换为 ${alternateHost || "备用地址"} 尝试」`}
           actions={
             <ActionPanel>
-              <Action title="重试连接" icon={Icon.ArrowClockwise} onAction={revalidate} />
+              <Action title="重试连接" icon={Icon.ArrowClockwise} onAction={() => fetchPrompts()} />
               {alternateHost && (
                 <Action
                   title={`切换为 ${alternateHost} 尝试`}
@@ -131,7 +153,7 @@ export default function Command() {
           }
           actions={
             <ActionPanel>
-              <Action title="刷新列表" icon={Icon.ArrowClockwise} onAction={revalidate} />
+              <Action title="刷新列表" icon={Icon.ArrowClockwise} onAction={() => fetchPrompts()} />
               <Action.OpenInBrowser title="在浏览器中打开 PromptHub" url={serverUrl} />
             </ActionPanel>
           }
@@ -283,7 +305,7 @@ export default function Command() {
                     <Action
                       title="Reload Prompts"
                       icon={Icon.ArrowClockwise}
-                      onAction={revalidate}
+                      onAction={() => fetchPrompts()}
                       shortcut={Keyboard.Shortcut.Common.Refresh}
                     />
                     <Action title="Open Preferences" icon={Icon.Gear} onAction={openExtensionPreferences} />
