@@ -1,16 +1,27 @@
 import { Action, ActionPanel, Color, Icon, List, openExtensionPreferences, Keyboard } from "@raycast/api";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import fetch, {
+  Headers as NodeFetchHeaders,
+  Request as NodeFetchRequest,
+  Response as NodeFetchResponse,
+} from "node-fetch";
 import { FillPlaceholdersForm } from "./components/FillPlaceholdersForm";
 import { KIND_LABELS, PromptHubItem, PromptHubResponse } from "./types";
 import { buildDetailMarkdown, getApiConfig, getKindIcon } from "./utils";
 
 // 兼容老版本 Node / Raycast 环境缺失的 Web API 全局变量
 const globalScope = globalThis as Record<string, unknown>;
+if (typeof globalScope.fetch === "undefined") {
+  globalScope.fetch = fetch;
+}
 if (typeof globalScope.Request === "undefined") {
-  globalScope.Request = class Request {};
+  globalScope.Request = NodeFetchRequest;
 }
 if (typeof globalScope.Response === "undefined") {
-  globalScope.Response = class Response {};
+  globalScope.Response = NodeFetchResponse;
+}
+if (typeof globalScope.Headers === "undefined") {
+  globalScope.Headers = NodeFetchHeaders;
 }
 
 export default function Command() {
