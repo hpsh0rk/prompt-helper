@@ -10,7 +10,32 @@ function getFetch() {
 }
 
 export const RECENT_PROMPTS_KEY = "prompt_helper_recent_prompts";
+export const PROMPTS_CACHE_KEY = "prompt_helper_cached_prompts";
 const MAX_RECENT_PROMPTS = 30;
+
+export async function getCachedPrompts(): Promise<PromptHubItem[]> {
+  try {
+    const raw = await LocalStorage.getItem<string>(PROMPTS_CACHE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed as PromptHubItem[];
+    }
+    return [];
+  } catch (err) {
+    console.error("[PromptHelper] failed to get cached prompts:", err);
+    return [];
+  }
+}
+
+export async function saveCachedPrompts(items: PromptHubItem[]): Promise<void> {
+  try {
+    const trimmed = items.slice(0, 50);
+    await LocalStorage.setItem(PROMPTS_CACHE_KEY, JSON.stringify(trimmed));
+  } catch (err) {
+    console.error("[PromptHelper] failed to save cached prompts:", err);
+  }
+}
 
 export async function getRecentPrompts(): Promise<PromptHubItem[]> {
   try {

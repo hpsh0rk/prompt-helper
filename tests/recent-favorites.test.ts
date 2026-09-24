@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PromptHubItem } from "../src/types";
 import {
   clearRecentPrompts,
+  getCachedPrompts,
   getRecentPrompts,
   recordPromptUsage,
+  saveCachedPrompts,
   toggleFavoritePrompt,
   updateRecentPromptFavorite,
 } from "../src/utils";
@@ -150,5 +152,33 @@ describe("toggleFavoritePrompt API Call", () => {
         Accept: "application/json",
       },
     });
+  });
+});
+
+describe("Cached Prompts SWR Snapshot", () => {
+  it("returns empty array when cache is empty", async () => {
+    const cached = await getCachedPrompts();
+    expect(cached).toEqual([]);
+  });
+
+  it("saves and retrieves cached prompts", async () => {
+    await saveCachedPrompts([mockItem1, mockItem2]);
+    const cached = await getCachedPrompts();
+    expect(cached.length).toBe(2);
+    expect(cached[0].id).toBe("prompt-1");
+    expect(cached[1].id).toBe("prompt-2");
+  });
+
+  it("caps cached prompts at 50 items", async () => {
+    const manyItems: PromptHubItem[] = Array.from({ length: 60 }, (_, i) => ({
+      ...mockItem1,
+      id: `prompt-${i}`,
+      title: `Prompt ${i}`,
+    }));
+    await saveCachedPrompts(manyItems);
+    const cached = await getCachedPrompts();
+    expect(cached.length).toBe(50);
+    expect(cached[0].id).toBe("prompt-0");
+    expect(cached[49].id).toBe("prompt-49");
   });
 });

@@ -25,11 +25,13 @@ import {
   clearRecentPrompts,
   deletePromptApi,
   getApiConfig,
+  getCachedPrompts,
   getKindIcon,
   getRecentPrompts,
   getSavedDefaultView,
   recordPromptUsage,
   removeRecentPrompt,
+  saveCachedPrompts,
   saveDefaultView,
   toggleFavoritePrompt,
   updateRecentPromptFavorite,
@@ -112,13 +114,20 @@ export default function Command() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
-  // 初始化加载本地记录的最近使用与持久化默认视图
+  // 初始化加载本地记录的最近使用、持久化默认视图及首屏缓存快照
   useEffect(() => {
     getRecentPrompts().then(setRecentPrompts);
     getSavedDefaultView().then((saved) => {
       const finalView = saved || baseConfig.defaultView || "all";
       setDefaultView(finalView);
       setFilterMode(finalView);
+    });
+    // 优先读取本地秒开快照
+    getCachedPrompts().then((cached) => {
+      if (cached && cached.length > 0) {
+        setPrompts((prev) => (prev.length === 0 ? cached : prev));
+        setIsLoading(false);
+      }
     });
   }, [baseConfig.defaultView]);
 
@@ -147,7 +156,8 @@ export default function Command() {
         return;
       }
 
-      setIsLoading(true);
+      // 如果已有内容，不强行将全局置为空白加载态，仅在首次无内容时显示 loading
+      setIsLoading((prevLoading) => (prompts.length === 0 ? true : prevLoading));
       setError(null);
       try {
         const qs = new URLSearchParams();
@@ -174,6 +184,11 @@ export default function Command() {
         const json = (await res.json()) as PromptHubResponse;
         setPrompts((prev) => (cursor ? [...prev, ...(json.items || [])] : json.items || []));
         setNextCursor(json.nextCursor || null);
+
+        // 静默更新首屏离线快照
+        if (!cursor && !trimmed && filterMode === "all") {
+          saveCachedPrompts(json.items || []).catch(() => {});
+        }
       } catch (err: unknown) {
         const errorObj = err instanceof Error ? err : new Error(String(err));
         console.error("[PromptHelper] fetch error:", errorObj);
@@ -182,7 +197,7 @@ export default function Command() {
         setIsLoading(false);
       }
     },
-    [endpoint, filterMode, headers, searchText],
+    [defaultView, endpoint, filterMode, headers, prompts.length, searchText],
   );
 
   useEffect(() => {
