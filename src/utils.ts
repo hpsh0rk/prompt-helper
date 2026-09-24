@@ -1,11 +1,12 @@
 import { Cache, Icon, LocalStorage, getPreferenceValues } from "@raycast/api";
-import nodeFetch from "node-fetch";
 import { CreatePromptInput, FilterMode, Preferences, PromptHubItem } from "./types";
 
 function getFetch() {
   if (typeof globalThis.fetch !== "undefined") {
     return globalThis.fetch;
   }
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const nodeFetch = require("node-fetch");
   return nodeFetch as unknown as typeof globalThis.fetch;
 }
 

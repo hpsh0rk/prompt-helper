@@ -12,11 +12,6 @@ import {
   showToast,
 } from "@raycast/api";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import fetch, {
-  Headers as NodeFetchHeaders,
-  Request as NodeFetchRequest,
-  Response as NodeFetchResponse,
-} from "node-fetch";
 import { CreatePromptForm } from "./components/CreatePromptForm";
 import { FillPlaceholdersForm } from "./components/FillPlaceholdersForm";
 import { FILTER_OPTIONS, FilterMode, KIND_LABELS, PromptHubItem, PromptHubResponse } from "./types";
@@ -40,19 +35,12 @@ import {
   updateRecentPromptFavorite,
 } from "./utils";
 
-// 兼容老版本 Node / Raycast 环境缺失的 Web API 全局变量
-const globalScope = globalThis as Record<string, unknown>;
-if (typeof globalScope.fetch === "undefined") {
-  globalScope.fetch = fetch;
-}
-if (typeof globalScope.Request === "undefined") {
-  globalScope.Request = NodeFetchRequest;
-}
-if (typeof globalScope.Response === "undefined") {
-  globalScope.Response = NodeFetchResponse;
-}
-if (typeof globalScope.Headers === "undefined") {
-  globalScope.Headers = NodeFetchHeaders;
+function getFetch() {
+  if (typeof globalThis.fetch !== "undefined") {
+    return globalThis.fetch;
+  }
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return require("node-fetch") as typeof globalThis.fetch;
 }
 
 function getFilterIcon(id: FilterMode): Icon {
@@ -208,7 +196,8 @@ export default function Command() {
         qs.set("limit", "30");
 
         const url = `${endpoint}?${qs.toString()}`;
-        const res = await fetch(url, { headers });
+        const f = getFetch();
+        const res = await f(url, { headers });
         if (!res.ok) {
           const text = await res.text().catch(() => "");
           throw new Error(`HTTP ${res.status} ${res.statusText}${text ? `: ${text}` : ""}`);
