@@ -1,11 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PromptHubItem } from "../src/types";
 import {
+  appCache,
   clearRecentPrompts,
   getCachedPrompts,
   getRecentPrompts,
+  getSyncCachedDefaultView,
+  getSyncCachedPrompts,
+  getSyncCachedRecent,
+  isCacheFresh,
   recordPromptUsage,
   saveCachedPrompts,
+  saveDefaultView,
+  saveSyncCachedPrompts,
   toggleFavoritePrompt,
   updateRecentPromptFavorite,
 } from "../src/utils";
@@ -181,4 +188,23 @@ describe("Cached Prompts SWR Snapshot", () => {
     expect(cached[0].id).toBe("prompt-0");
     expect(cached[49].id).toBe("prompt-49");
   });
+
+  it("synchronously gets and sets prompts in memory cache", () => {
+    saveSyncCachedPrompts([mockItem1]);
+    const sync = getSyncCachedPrompts();
+    expect(sync.length).toBe(1);
+    expect(sync[0].id).toBe("prompt-1");
+    expect(isCacheFresh(10000)).toBe(true);
+  });
+
+  it("supports dual-write for default view and recent prompts", async () => {
+    await saveDefaultView("favorites");
+    expect(getSyncCachedDefaultView()).toBe("favorites");
+
+    await recordPromptUsage(mockItem2);
+    const syncRecent = getSyncCachedRecent();
+    expect(syncRecent.length).toBe(1);
+    expect(syncRecent[0].id).toBe("prompt-2");
+  });
 });
+

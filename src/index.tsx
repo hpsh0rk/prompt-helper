@@ -11,7 +11,7 @@ import {
   openExtensionPreferences,
   showToast,
 } from "@raycast/api";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import fetch, {
   Headers as NodeFetchHeaders,
   Request as NodeFetchRequest,
@@ -25,10 +25,13 @@ import {
   clearRecentPrompts,
   deletePromptApi,
   getApiConfig,
-  getCachedPrompts,
   getKindIcon,
   getRecentPrompts,
   getSavedDefaultView,
+  getSyncCachedDefaultView,
+  getSyncCachedPrompts,
+  getSyncCachedRecent,
+  isCacheFresh,
   recordPromptUsage,
   removeRecentPrompt,
   saveCachedPrompts,
@@ -86,9 +89,15 @@ function matchPrompt(prompt: PromptHubItem, query: string): boolean {
 
 export default function Command() {
   const baseConfig = useMemo(() => getApiConfig(), []);
+
+  const initialDefaultView = useMemo(() => {
+    return getSyncCachedDefaultView() || baseConfig.defaultView || "all";
+  }, [baseConfig.defaultView]);
+
   const [searchText, setSearchText] = useState("");
-  const [defaultView, setDefaultView] = useState<FilterMode>(baseConfig.defaultView || "all");
-  const [filterMode, setFilterMode] = useState<FilterMode>(baseConfig.defaultView || "all");
+  const [debouncedSearchText, setDebouncedSearchText] = useState("");
+  const [defaultView, setDefaultView] = useState<FilterMode>(initialDefaultView);
+  const [filterMode, setFilterMode] = useState<FilterMode>(initialDefaultView);
   const [fallbackHost, setFallbackHost] = useState<string | null>(null);
 
   const serverUrl = useMemo(() => {
@@ -108,28 +117,44 @@ export default function Command() {
 
   const headers = baseConfig.headers;
 
-  const [prompts, setPrompts] = useState<PromptHubItem[]>([]);
-  const [recentPrompts, setRecentPrompts] = useState<PromptHubItem[]>([]);
+  // 0ms 同步秒开数据，首帧直接从内存/本地 Cache 还原
+  const [prompts, setPrompts] = useState<PromptHubItem[]>(getSyncCachedPrompts);
+  const [recentPrompts, setRecentPrompts] = useState<PromptHubItem[]>(getSyncCachedRecent);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+
+  // 首屏若已同步读到缓存，isLoading 初始直接为 false，零菊花转圈
+  const [isLoading, setIsLoading] = useState<boolean>(() => {
+    if (initialDefaultView === "recent") return false;
+    const initialCached = getSyncCachedPrompts();
+    return initialCached.length === 0;
+  });
   const [error, setError] = useState<Error | null>(null);
 
-  // 初始化加载本地记录的最近使用、持久化默认视图及首屏缓存快照
+  const promptsRef = useRef(prompts);
+  promptsRef.current = prompts;
+
+  // 搜索输入 250ms 防抖，避免打字时每敲一个按键都高频触发网络请求卡顿主线程
   useEffect(() => {
-    getRecentPrompts().then(setRecentPrompts);
+    const timer = setTimeout(() => {
+      setDebouncedSearchText(searchText);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [searchText]);
+
+  // 兜底异步检查持久化数据（若 Cache 冷启动为空时从 LocalStorage 回填）
+  useEffect(() => {
+    if (recentPrompts.length === 0) {
+      getRecentPrompts().then((list) => {
+        if (list.length > 0) setRecentPrompts(list);
+      });
+    }
     getSavedDefaultView().then((saved) => {
-      const finalView = saved || baseConfig.defaultView || "all";
-      setDefaultView(finalView);
-      setFilterMode(finalView);
-    });
-    // 优先读取本地秒开快照
-    getCachedPrompts().then((cached) => {
-      if (cached && cached.length > 0) {
-        setPrompts((prev) => (prev.length === 0 ? cached : prev));
-        setIsLoading(false);
+      if (saved && saved !== defaultView) {
+        setDefaultView(saved);
+        setFilterMode(saved);
       }
     });
-  }, [baseConfig.defaultView]);
+  }, []);
 
   const handleSetDefaultView = useCallback(async (view: FilterMode) => {
     await saveDefaultView(view);
@@ -148,27 +173,34 @@ export default function Command() {
   }, []);
 
   const fetchPrompts = useCallback(
-    async (cursor?: string | null) => {
-      // 若处于 recent 模式，数据直接走本地 Storage，不发起远端接口翻页
-      if (filterMode === "recent") {
+    async (options?: { cursor?: string | null; isSilent?: boolean; search?: string; mode?: FilterMode }) => {
+      const mode = options?.mode ?? filterMode;
+      const search = options?.search ?? debouncedSearchText;
+      const cursor = options?.cursor ?? null;
+      const isSilent = options?.isSilent ?? false;
+
+      // 若处于 recent 模式，数据直接走本地 Storage/Cache，不发起远端接口请求
+      if (mode === "recent") {
         setIsLoading(false);
         setError(null);
         return;
       }
 
-      // 如果已有内容，不强行将全局置为空白加载态，仅在首次无内容时显示 loading
-      setIsLoading((prevLoading) => (prompts.length === 0 ? true : prevLoading));
+      if (!isSilent) {
+        setIsLoading(true);
+      }
       setError(null);
+
       try {
         const qs = new URLSearchParams();
-        const trimmed = searchText.trim();
+        const trimmed = search.trim();
         if (trimmed) {
           qs.set("q", trimmed);
         }
-        if (filterMode === "favorites") {
+        if (mode === "favorites") {
           qs.set("favorite", "true");
-        } else if (filterMode !== "all") {
-          qs.set("kind", filterMode);
+        } else if (mode !== "all") {
+          qs.set("kind", mode);
         }
         if (cursor) {
           qs.set("cursor", cursor);
@@ -182,27 +214,75 @@ export default function Command() {
           throw new Error(`HTTP ${res.status} ${res.statusText}${text ? `: ${text}` : ""}`);
         }
         const json = (await res.json()) as PromptHubResponse;
-        setPrompts((prev) => (cursor ? [...prev, ...(json.items || [])] : json.items || []));
-        setNextCursor(json.nextCursor || null);
+        const fetchedItems = json.items || [];
 
-        // 静默更新首屏离线快照
-        if (!cursor && !trimmed && filterMode === "all") {
-          saveCachedPrompts(json.items || []).catch(() => {});
+        if (cursor) {
+          setPrompts((prev) => [...prev, ...fetchedItems]);
+        } else {
+          // 若为静默刷新，比对新老数据 ID 列表，无变动时不触发重绘
+          if (isSilent) {
+            const oldIds = promptsRef.current.map((p) => p.id).join(",");
+            const newIds = fetchedItems.map((p) => p.id).join(",");
+            if (oldIds !== newIds) {
+              setPrompts(fetchedItems);
+            }
+          } else {
+            setPrompts(fetchedItems);
+          }
+
+          // 仅在全部视图、无搜索、第一页时更新快照
+          if (!trimmed && mode === "all") {
+            saveCachedPrompts(fetchedItems).catch(() => {});
+          }
         }
+        setNextCursor(json.nextCursor || null);
       } catch (err: unknown) {
         const errorObj = err instanceof Error ? err : new Error(String(err));
         console.error("[PromptHelper] fetch error:", errorObj);
-        setError(errorObj);
+        // 静默后台对齐失败不报错打扰用户
+        if (!isSilent) {
+          setError(errorObj);
+        }
       } finally {
-        setIsLoading(false);
+        if (!isSilent) {
+          setIsLoading(false);
+        }
       }
     },
-    [defaultView, endpoint, filterMode, headers, prompts.length, searchText],
+    [debouncedSearchText, endpoint, filterMode, headers],
   );
 
+  // 1. 唤醒生命周期：后台异步按需对齐，绝不阻塞唤醒瞬间
   useEffect(() => {
-    fetchPrompts();
-  }, [fetchPrompts]);
+    // 若初始视图为 recent，完全不发起网络请求
+    if (initialDefaultView === "recent") return;
+
+    // 若缓存处于新鲜期（60s 内），完全跳过网络请求，极致 0ms 纯离线
+    if (isCacheFresh() && prompts.length > 0) return;
+
+    // 若已超出新鲜期但已有缓存：延迟 600ms（避开刚唤醒时的线程争抢）在后台静默发起对齐
+    const hasCache = prompts.length > 0;
+    const delay = hasCache ? 600 : 0;
+
+    const timer = setTimeout(() => {
+      // 若用户尚未打字、且不在 recent 模式，在后台静默对齐
+      if (!searchText.trim() && filterMode !== "recent") {
+        fetchPrompts({ isSilent: hasCache, mode: filterMode });
+      }
+    }, delay);
+
+    return () => clearTimeout(timer);
+  }, []);
+
+  // 2. 用户主动交互响应（搜索词防抖变化，或手动切换了下拉视图）
+  const isFirstMount = useRef(true);
+  useEffect(() => {
+    if (isFirstMount.current) {
+      isFirstMount.current = false;
+      return;
+    }
+    fetchPrompts({ search: debouncedSearchText, mode: filterMode, isSilent: false });
+  }, [debouncedSearchText, filterMode]);
 
   const handleRecordUsage = useCallback(async (prompt: PromptHubItem) => {
     const updated = await recordPromptUsage(prompt);
@@ -470,7 +550,7 @@ export default function Command() {
               <Action
                 title="Reload Prompts"
                 icon={Icon.ArrowClockwise}
-                onAction={() => fetchPrompts()}
+                onAction={() => fetchPrompts({ isSilent: false })}
                 shortcut={Keyboard.Shortcut.Common.Refresh}
               />
               {filterMode === "recent" && (
@@ -571,7 +651,7 @@ export default function Command() {
               hasMore: Boolean(nextCursor),
               onLoadMore: () => {
                 if (nextCursor && !isLoading) {
-                  fetchPrompts(nextCursor);
+                  fetchPrompts({ cursor: nextCursor, isSilent: false });
                 }
               },
             }
@@ -599,7 +679,7 @@ export default function Command() {
           description={`请求端点: ${endpoint}\n\n排查建议：\n1. 请确认本地 Next.js 服务已启动（http://127.0.0.1:3210）\n2. 若开启了科学上网/代理工具，请确认 127.0.0.1 / localhost 在代理软件中已设为直连旁路\n3. 可尝试点击下方「切换为 ${alternateHost || "备用地址"} 尝试」`}
           actions={
             <ActionPanel>
-              <Action title="重试连接" icon={Icon.ArrowClockwise} onAction={() => fetchPrompts()} />
+              <Action title="重试连接" icon={Icon.ArrowClockwise} onAction={() => fetchPrompts({ isSilent: false })} />
               {alternateHost && (
                 <Action
                   title={`切换为 ${alternateHost} 尝试`}
@@ -661,7 +741,7 @@ export default function Command() {
                   <CreatePromptForm serverUrl={serverUrl} apiKey={baseConfig.apiKey} onCreated={handleCreatedPrompt} />
                 }
               />
-              <Action title="刷新列表" icon={Icon.ArrowClockwise} onAction={() => fetchPrompts()} />
+              <Action title="刷新列表" icon={Icon.ArrowClockwise} onAction={() => fetchPrompts({ isSilent: false })} />
               <Action.OpenInBrowser title="在浏览器中打开 PromptHub" url={serverUrl} />
               <ActionPanel.Section title="视图与偏好">
                 <ActionPanel.Submenu

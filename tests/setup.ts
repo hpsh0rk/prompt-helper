@@ -66,5 +66,20 @@ vi.mock("@raycast/api", () => {
         }),
       };
     })(),
+    Cache: class MockCache {
+      private static store = new Map<string, string>();
+      get(key: string) {
+        return MockCache.store.get(key);
+      }
+      set(key: string, val: string) {
+        MockCache.store.set(key, String(val));
+      }
+      remove(key: string) {
+        MockCache.store.delete(key);
+      }
+      clear() {
+        MockCache.store.clear();
+      }
+    },
   };
 });
