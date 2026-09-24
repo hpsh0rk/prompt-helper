@@ -19,7 +19,16 @@ vi.mock("@raycast/api", () => {
       Link: "link-icon",
       ArrowClockwise: "refresh-icon",
       Gear: "gear-icon",
+      Plus: "plus-icon",
+      Trash: "trash-icon",
     },
+    Alert: {
+      ActionStyle: {
+        Default: "default",
+        Destructive: "destructive",
+      },
+    },
+    confirmAlert: vi.fn(async () => true),
     Color: {
       Red: "red",
       Yellow: "yellow",

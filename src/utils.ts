@@ -1,6 +1,6 @@
 import { Icon, LocalStorage, getPreferenceValues } from "@raycast/api";
 import nodeFetch from "node-fetch";
-import { Preferences, PromptHubItem } from "./types";
+import { CreatePromptInput, Preferences, PromptHubItem } from "./types";
 
 function getFetch() {
   if (typeof globalThis.fetch !== "undefined") {
@@ -45,6 +45,18 @@ export async function clearRecentPrompts(): Promise<void> {
     await LocalStorage.removeItem(RECENT_PROMPTS_KEY);
   } catch (err) {
     console.error("[PromptHelper] failed to clear recent prompts:", err);
+  }
+}
+
+export async function removeRecentPrompt(promptId: string): Promise<PromptHubItem[]> {
+  try {
+    const current = await getRecentPrompts();
+    const updated = current.filter((p) => p.id !== promptId);
+    await LocalStorage.setItem(RECENT_PROMPTS_KEY, JSON.stringify(updated));
+    return updated;
+  } catch (err) {
+    console.error("[PromptHelper] failed to remove recent prompt:", err);
+    return [];
   }
 }
 
@@ -128,6 +140,66 @@ export async function toggleFavoritePrompt(
   }
 }
 
+export async function createPromptApi(
+  serverUrl: string,
+  apiKey: string | undefined,
+  input: CreatePromptInput,
+): Promise<{ id: string; versionNo?: number }> {
+  const f = getFetch();
+  const endpoint = apiKey ? `${serverUrl}/api/v1/prompts` : `${serverUrl}/library-items`;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  };
+  if (apiKey) {
+    headers.Authorization = `Bearer ${apiKey}`;
+  }
+
+  const res = await f(endpoint, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(input),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`HTTP ${res.status} ${res.statusText}${text ? `: ${text}` : ""}`);
+  }
+
+  const data = (await res.json()) as { id: string; versionNo?: number };
+  return data;
+}
+
+export async function deletePromptApi(
+  serverUrl: string,
+  apiKey: string | undefined,
+  promptId: string,
+): Promise<{ deleted: boolean }> {
+  const f = getFetch();
+  const endpoint = apiKey
+    ? `${serverUrl}/api/v1/prompts/${encodeURIComponent(promptId)}`
+    : `${serverUrl}/library-items?id=${encodeURIComponent(promptId)}`;
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+  };
+  if (apiKey) {
+    headers.Authorization = `Bearer ${apiKey}`;
+  }
+
+  const res = await f(endpoint, {
+    method: "DELETE",
+    headers,
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`HTTP ${res.status} ${res.statusText}${text ? `: ${text}` : ""}`);
+  }
+
+  const data = (await res.json()) as { deleted: boolean };
+  return data;
+}
+
 export function getApiConfig() {
   const prefs = getPreferenceValues<Preferences>();
   let serverUrl = (prefs.serverUrl || "http://127.0.0.1:3210").trim();
@@ -135,6 +207,7 @@ export function getApiConfig() {
     serverUrl = serverUrl.slice(0, -1);
   }
   const apiKey = (prefs.apiKey || "").trim();
+  const defaultView = prefs.defaultView || "all";
 
   // 若提供了 PAT，走标准对外 API /api/v1/prompts；若未提供，本地回退到免鉴权 /library-items 端点
   const endpoint = apiKey ? `${serverUrl}/api/v1/prompts` : `${serverUrl}/library-items`;
@@ -145,7 +218,7 @@ export function getApiConfig() {
     headers.Authorization = `Bearer ${apiKey}`;
   }
 
-  return { serverUrl, apiKey, endpoint, headers };
+  return { serverUrl, apiKey, endpoint, headers, defaultView };
 }
 
 export function getKindIcon(kind: string): Icon {

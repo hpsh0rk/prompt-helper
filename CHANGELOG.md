@@ -1,5 +1,22 @@
 # Prompt Helper Changelog
 
+## [2.2.0] - 2026-09-24
+
+### Added
+- **新建提示词 (Create Prompt)**：
+  - 新增 `Cmd + N` 快捷键唤出 `CreatePromptForm` 表单，支持快速录入标题、类型、正文、标签、推荐模型与使用说明；
+  - 创建成功后自动将新提示词记录至「🕒 最近使用」首位，并自动刷新当前列表；
+  - 适配本地免 PAT 端点（`POST /library-items`）与云端 PAT 端点（`POST /api/v1/prompts`）；
+- **删除提示词 (Delete Prompt)**：
+  - 新增 `Ctrl + X` 快捷键触发安全删除动作，弹出 Raycast 官方 `confirmAlert` 破坏性二次确认框；
+  - 确认后执行软删除，并同步从「🕒 最近使用」及当前列表中清理；
+  - 适配本地免 PAT 端点（`DELETE /library-items?id=...`）与云端 PAT 端点（`DELETE /api/v1/prompts/...`）；
+- **默认视图首选项配置 (Default View Preference)**：
+  - 在 Raycast 设置中新增「默认展示视图」下拉配置（全部提示词 / ⭐ 我的收藏 / 🕒 最近使用）；
+  - 启动插件时自动根据用户偏好停留在预设视图；
+- **测试覆盖**：
+  - 补充 `tests/create-delete.test.ts`，涵盖本地/云端创建与删除、偏好配置读取等 6 项测试（全套共 21 项测试全部通过）。
+
 ## [2.1.0] - 2026-09-23
 
 ### Added

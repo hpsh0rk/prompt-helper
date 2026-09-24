@@ -28,6 +28,18 @@ export interface PromptHubResponse {
 export interface Preferences {
   serverUrl?: string;
   apiKey?: string;
+  defaultView?: "all" | "favorites" | "recent";
+}
+
+export interface CreatePromptInput {
+  title?: string;
+  content: string;
+  kind?: "image" | "text" | "code" | "video" | "audio" | string;
+  tags?: string[];
+  model?: string;
+  negative_prompt?: string;
+  usage_notes?: string;
+  placeholder_defaults?: Record<string, string>;
 }
 
 export type FilterMode = "all" | "favorites" | "recent" | "image" | "text" | "code" | "video" | "audio";

@@ -1,11 +1,13 @@
 import {
   Action,
   ActionPanel,
+  Alert,
   Color,
   Icon,
   Keyboard,
   List,
   Toast,
+  confirmAlert,
   openExtensionPreferences,
   showToast,
 } from "@raycast/api";
@@ -15,15 +17,18 @@ import fetch, {
   Request as NodeFetchRequest,
   Response as NodeFetchResponse,
 } from "node-fetch";
+import { CreatePromptForm } from "./components/CreatePromptForm";
 import { FillPlaceholdersForm } from "./components/FillPlaceholdersForm";
 import { FILTER_OPTIONS, FilterMode, KIND_LABELS, PromptHubItem, PromptHubResponse } from "./types";
 import {
   buildDetailMarkdown,
   clearRecentPrompts,
+  deletePromptApi,
   getApiConfig,
   getKindIcon,
   getRecentPrompts,
   recordPromptUsage,
+  removeRecentPrompt,
   toggleFavoritePrompt,
   updateRecentPromptFavorite,
 } from "./utils";
@@ -76,11 +81,11 @@ function matchPrompt(prompt: PromptHubItem, query: string): boolean {
 }
 
 export default function Command() {
+  const baseConfig = useMemo(() => getApiConfig(), []);
   const [searchText, setSearchText] = useState("");
-  const [filterMode, setFilterMode] = useState<FilterMode>("all");
+  const [filterMode, setFilterMode] = useState<FilterMode>(baseConfig.defaultView || "all");
   const [fallbackHost, setFallbackHost] = useState<string | null>(null);
 
-  const baseConfig = useMemo(() => getApiConfig(), []);
   const serverUrl = useMemo(() => {
     if (!fallbackHost) return baseConfig.serverUrl;
     try {
@@ -173,6 +178,48 @@ export default function Command() {
       title: "已清空最近使用记录",
     });
   }, []);
+
+  const handleCreatedPrompt = useCallback((newItem: PromptHubItem) => {
+    setPrompts((prev) => [newItem, ...prev]);
+    setRecentPrompts((prev) => [newItem, ...prev.filter((p) => p.id !== newItem.id)]);
+  }, []);
+
+  const handleDeletePrompt = useCallback(
+    async (prompt: PromptHubItem) => {
+      const confirmed = await confirmAlert({
+        title: "确定删除此提示词吗？",
+        message: `将从 PromptHub 中移除「${prompt.title || prompt.content.slice(0, 30)}」`,
+        primaryAction: {
+          title: "确认删除",
+          style: Alert.ActionStyle.Destructive,
+        },
+      });
+
+      if (!confirmed) return;
+
+      try {
+        await deletePromptApi(serverUrl, baseConfig.apiKey, prompt.id);
+        // 从当前列表移除
+        setPrompts((prev) => prev.filter((p) => p.id !== prompt.id));
+        // 从本地最近使用移除
+        const updatedRecent = await removeRecentPrompt(prompt.id);
+        setRecentPrompts(updatedRecent);
+
+        await showToast({
+          style: Toast.Style.Success,
+          title: "提示词已删除",
+        });
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        await showToast({
+          style: Toast.Style.Failure,
+          title: "删除失败",
+          message: msg,
+        });
+      }
+    },
+    [baseConfig.apiKey, serverUrl],
+  );
 
   const handleToggleFavorite = useCallback(
     async (prompt: PromptHubItem) => {
@@ -355,6 +402,14 @@ export default function Command() {
               </>
             )}
             <ActionPanel.Section>
+              <Action.Push
+                title="Create New Prompt"
+                icon={Icon.Plus}
+                shortcut={Keyboard.Shortcut.Common.New}
+                target={
+                  <CreatePromptForm serverUrl={serverUrl} apiKey={baseConfig.apiKey} onCreated={handleCreatedPrompt} />
+                }
+              />
               <Action
                 title={prompt.favorited ? "取消收藏" : "加入收藏"}
                 icon={{
@@ -388,6 +443,15 @@ export default function Command() {
                 />
               )}
               <Action title="Open Preferences" icon={Icon.Gear} onAction={openExtensionPreferences} />
+            </ActionPanel.Section>
+            <ActionPanel.Section>
+              <Action
+                title="Delete Prompt"
+                icon={Icon.Trash}
+                style={Action.Style.Destructive}
+                shortcut={{ modifiers: ["ctrl"], key: "x" }}
+                onAction={() => handleDeletePrompt(prompt)}
+              />
             </ActionPanel.Section>
           </ActionPanel>
         }
@@ -515,6 +579,14 @@ export default function Command() {
           }
           actions={
             <ActionPanel>
+              <Action.Push
+                title="Create New Prompt"
+                icon={Icon.Plus}
+                shortcut={Keyboard.Shortcut.Common.New}
+                target={
+                  <CreatePromptForm serverUrl={serverUrl} apiKey={baseConfig.apiKey} onCreated={handleCreatedPrompt} />
+                }
+              />
               <Action title="刷新列表" icon={Icon.ArrowClockwise} onAction={() => fetchPrompts()} />
               <Action.OpenInBrowser title="在浏览器中打开 PromptHub" url={serverUrl} />
             </ActionPanel>
