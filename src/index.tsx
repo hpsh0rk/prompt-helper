@@ -27,8 +27,10 @@ import {
   getApiConfig,
   getKindIcon,
   getRecentPrompts,
+  getSavedDefaultView,
   recordPromptUsage,
   removeRecentPrompt,
+  saveDefaultView,
   toggleFavoritePrompt,
   updateRecentPromptFavorite,
 } from "./utils";
@@ -83,6 +85,7 @@ function matchPrompt(prompt: PromptHubItem, query: string): boolean {
 export default function Command() {
   const baseConfig = useMemo(() => getApiConfig(), []);
   const [searchText, setSearchText] = useState("");
+  const [defaultView, setDefaultView] = useState<FilterMode>(baseConfig.defaultView || "all");
   const [filterMode, setFilterMode] = useState<FilterMode>(baseConfig.defaultView || "all");
   const [fallbackHost, setFallbackHost] = useState<string | null>(null);
 
@@ -109,9 +112,30 @@ export default function Command() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
-  // 初始化加载本地记录的最近使用
+  // 初始化加载本地记录的最近使用与持久化默认视图
   useEffect(() => {
     getRecentPrompts().then(setRecentPrompts);
+    getSavedDefaultView().then((saved) => {
+      const finalView = saved || baseConfig.defaultView || "all";
+      setDefaultView(finalView);
+      setFilterMode(finalView);
+    });
+  }, [baseConfig.defaultView]);
+
+  const handleSetDefaultView = useCallback(async (view: FilterMode) => {
+    await saveDefaultView(view);
+    setDefaultView(view);
+    setFilterMode(view);
+    const viewLabels: Record<string, string> = {
+      all: "全部提示词 (智能分段)",
+      favorites: "⭐ 我的收藏",
+      recent: "🕒 最近使用",
+    };
+    await showToast({
+      style: Toast.Style.Success,
+      title: `已将「${viewLabels[view] || view}」设为默认视图`,
+      message: "下次打开插件将自动进入此视图",
+    });
   }, []);
 
   const fetchPrompts = useCallback(
@@ -442,8 +466,38 @@ export default function Command() {
                   onAction={handleClearRecent}
                 />
               )}
-              <Action title="Open Preferences" icon={Icon.Gear} onAction={openExtensionPreferences} />
             </ActionPanel.Section>
+
+            <ActionPanel.Section title="视图与偏好">
+              <ActionPanel.Submenu
+                title="设置默认展示视图"
+                icon={Icon.Eye}
+                shortcut={Keyboard.Shortcut.Common.Duplicate}
+              >
+                <Action
+                  title={`全部提示词 (智能分段)${defaultView === "all" ? " (当前默认)" : ""}`}
+                  icon={defaultView === "all" ? Icon.Checkmark : Icon.List}
+                  onAction={() => handleSetDefaultView("all")}
+                />
+                <Action
+                  title={`⭐ 我的收藏 (Favorites)${defaultView === "favorites" ? " (当前默认)" : ""}`}
+                  icon={defaultView === "favorites" ? Icon.Checkmark : Icon.Star}
+                  onAction={() => handleSetDefaultView("favorites")}
+                />
+                <Action
+                  title={`🕒 最近使用 (Recent)${defaultView === "recent" ? " (当前默认)" : ""}`}
+                  icon={defaultView === "recent" ? Icon.Checkmark : Icon.Clock}
+                  onAction={() => handleSetDefaultView("recent")}
+                />
+              </ActionPanel.Submenu>
+              <Action
+                title="打开插件偏好设置"
+                icon={Icon.Gear}
+                shortcut={{ modifiers: ["cmd", "shift"], key: "," }}
+                onAction={openExtensionPreferences}
+              />
+            </ActionPanel.Section>
+
             <ActionPanel.Section>
               <Action
                 title="Delete Prompt"
@@ -544,7 +598,12 @@ export default function Command() {
                 content={`Endpoint: ${endpoint}\nError: ${error.name}: ${error.message}\nStack: ${error.stack || ""}`}
               />
               <Action.OpenInBrowser title="在浏览器中测试打开 PromptHub" url={serverUrl} />
-              <Action title="打开插件设置" icon={Icon.Gear} onAction={openExtensionPreferences} />
+              <Action
+                title="打开插件偏好设置"
+                icon={Icon.Gear}
+                shortcut={{ modifiers: ["cmd", "shift"], key: "," }}
+                onAction={openExtensionPreferences}
+              />
             </ActionPanel>
           }
         />
@@ -589,6 +648,35 @@ export default function Command() {
               />
               <Action title="刷新列表" icon={Icon.ArrowClockwise} onAction={() => fetchPrompts()} />
               <Action.OpenInBrowser title="在浏览器中打开 PromptHub" url={serverUrl} />
+              <ActionPanel.Section title="视图与偏好">
+                <ActionPanel.Submenu
+                  title="设置默认展示视图"
+                  icon={Icon.Eye}
+                  shortcut={Keyboard.Shortcut.Common.Duplicate}
+                >
+                  <Action
+                    title={`全部提示词 (智能分段)${defaultView === "all" ? " (当前默认)" : ""}`}
+                    icon={defaultView === "all" ? Icon.Checkmark : Icon.List}
+                    onAction={() => handleSetDefaultView("all")}
+                  />
+                  <Action
+                    title={`⭐ 我的收藏 (Favorites)${defaultView === "favorites" ? " (当前默认)" : ""}`}
+                    icon={defaultView === "favorites" ? Icon.Checkmark : Icon.Star}
+                    onAction={() => handleSetDefaultView("favorites")}
+                  />
+                  <Action
+                    title={`🕒 最近使用 (Recent)${defaultView === "recent" ? " (当前默认)" : ""}`}
+                    icon={defaultView === "recent" ? Icon.Checkmark : Icon.Clock}
+                    onAction={() => handleSetDefaultView("recent")}
+                  />
+                </ActionPanel.Submenu>
+                <Action
+                  title="打开插件偏好设置"
+                  icon={Icon.Gear}
+                  shortcut={{ modifiers: ["cmd", "shift"], key: "," }}
+                  onAction={openExtensionPreferences}
+                />
+              </ActionPanel.Section>
             </ActionPanel>
           }
         />

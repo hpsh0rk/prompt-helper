@@ -1,6 +1,6 @@
 import { Icon, LocalStorage, getPreferenceValues } from "@raycast/api";
 import nodeFetch from "node-fetch";
-import { CreatePromptInput, Preferences, PromptHubItem } from "./types";
+import { CreatePromptInput, FilterMode, Preferences, PromptHubItem } from "./types";
 
 function getFetch() {
   if (typeof globalThis.fetch !== "undefined") {
@@ -57,6 +57,28 @@ export async function removeRecentPrompt(promptId: string): Promise<PromptHubIte
   } catch (err) {
     console.error("[PromptHelper] failed to remove recent prompt:", err);
     return [];
+  }
+}
+
+export const DEFAULT_VIEW_KEY = "prompt_helper_default_view";
+
+export async function getSavedDefaultView(): Promise<FilterMode | null> {
+  try {
+    const saved = await LocalStorage.getItem<string>(DEFAULT_VIEW_KEY);
+    if (saved === "all" || saved === "favorites" || saved === "recent") {
+      return saved as FilterMode;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveDefaultView(view: FilterMode): Promise<void> {
+  try {
+    await LocalStorage.setItem(DEFAULT_VIEW_KEY, view);
+  } catch (err) {
+    console.error("[PromptHelper] failed to save default view:", err);
   }
 }
 

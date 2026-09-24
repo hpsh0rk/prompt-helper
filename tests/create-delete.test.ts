@@ -144,3 +144,17 @@ describe("getApiConfig defaults", () => {
     expect(cfg.defaultView).toBe("all");
   });
 });
+
+describe("default view local persistence", () => {
+  it("saves and retrieves default view from local storage", async () => {
+    const { getSavedDefaultView, saveDefaultView } = await import("../src/utils");
+    await saveDefaultView("favorites");
+    expect(await getSavedDefaultView()).toBe("favorites");
+
+    await saveDefaultView("recent");
+    expect(await getSavedDefaultView()).toBe("recent");
+
+    await saveDefaultView("all");
+    expect(await getSavedDefaultView()).toBe("all");
+  });
+});

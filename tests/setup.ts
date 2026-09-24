@@ -21,6 +21,8 @@ vi.mock("@raycast/api", () => {
       Gear: "gear-icon",
       Plus: "plus-icon",
       Trash: "trash-icon",
+      Eye: "eye-icon",
+      Checkmark: "checkmark-icon",
     },
     Alert: {
       ActionStyle: {
