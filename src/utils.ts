@@ -264,12 +264,40 @@ export async function toggleFavoritePrompt(
       body: JSON.stringify({ prompt_id: promptId }),
     });
     if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`HTTP ${res.status} ${res.statusText}${text ? `: ${text}` : ""}`);
+      const detail = await parseErrorResponse(res);
+      throw new Error(detail);
     }
     const data = (await res.json()) as { favorited: boolean };
     return { favorited: Boolean(data.favorited) };
   }
+}
+
+async function parseErrorResponse(res: {
+  status: number;
+  statusText: string;
+  text: () => Promise<string>;
+}): Promise<string> {
+  const text = await res.text().catch(() => "");
+  try {
+    const errJson = JSON.parse(text);
+    return errJson?.error?.message || errJson?.message || text || `HTTP ${res.status} ${res.statusText}`;
+  } catch {
+    return text || `HTTP ${res.status} ${res.statusText}`;
+  }
+}
+
+export function formatApiError(err: unknown, serverUrl?: string): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (
+    msg.includes("ECONNREFUSED") ||
+    msg.includes("fetch failed") ||
+    msg.includes("Failed to fetch") ||
+    msg.includes("ENOTFOUND")
+  ) {
+    const target = serverUrl || "http://127.0.0.1:3210";
+    return `PromptHub 服务未启动或无法连接 (${target})。请确认已在终端启动服务：cd ~/prompt-hub/app && npm run start`;
+  }
+  return msg;
 }
 
 export async function createPromptApi(
@@ -294,8 +322,8 @@ export async function createPromptApi(
   });
 
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`HTTP ${res.status} ${res.statusText}${text ? `: ${text}` : ""}`);
+    const detail = await parseErrorResponse(res);
+    throw new Error(detail);
   }
 
   const data = (await res.json()) as { id: string; versionNo?: number };
@@ -324,8 +352,8 @@ export async function deletePromptApi(
   });
 
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`HTTP ${res.status} ${res.statusText}${text ? `: ${text}` : ""}`);
+    const detail = await parseErrorResponse(res);
+    throw new Error(detail);
   }
 
   const data = (await res.json()) as { deleted: boolean };

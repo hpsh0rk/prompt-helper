@@ -1,5 +1,14 @@
 # Prompt Helper Changelog
 
+## [2.2.1] - 2026-09-24
+
+### Fixed
+- **API 错误与网络中断友好提示**：
+  - 新增 `formatApiError`，当本地 PromptHub 服务未启动或连接断开（`ECONNREFUSED` / `fetch failed`）时，在 Toast 中给出明确的启动命令提示（`cd ~/prompt-hub/app && npm run start`）；
+  - 新增 `parseErrorResponse`，在后端返回 4xx 错误时提取具体 JSON 业务错误信息直接上屏展示；
+- **测试覆盖**：
+  - 在 `tests/create-delete.test.ts` 补充 `ECONNREFUSED` 错误格式化及 JSON 错误解析断言，全套 29 项测试全绿。
+
 ## [2.2.0] - 2026-09-24
 
 ### Added

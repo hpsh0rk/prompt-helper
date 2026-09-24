@@ -1,7 +1,7 @@
 import { Action, ActionPanel, Form, Icon, Toast, showToast, useNavigation } from "@raycast/api";
 import { useCallback, useState } from "react";
 import { CreatePromptInput, PromptHubItem, extractAllPlaceholders } from "../types";
-import { createPromptApi, recordPromptUsage } from "../utils";
+import { createPromptApi, formatApiError, recordPromptUsage } from "../utils";
 
 interface Props {
   serverUrl: string;
@@ -80,7 +80,7 @@ export function CreatePromptForm({ serverUrl, apiKey, onCreated }: Props) {
 
         pop();
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = formatApiError(err, serverUrl);
         await showToast({
           style: Toast.Style.Failure,
           title: "创建失败",

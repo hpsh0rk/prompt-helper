@@ -158,3 +158,27 @@ describe("default view local persistence", () => {
     expect(await getSavedDefaultView()).toBe("all");
   });
 });
+
+describe("formatApiError & API Error Handling", () => {
+  it("formats ECONNREFUSED with actionable guidance", async () => {
+    const { formatApiError } = await import("../src/utils");
+    const err = new Error("request to http://127.0.0.1:3210/library-items failed, reason: connect ECONNREFUSED 127.0.0.1:3210");
+    const formatted = formatApiError(err, "http://127.0.0.1:3210");
+    expect(formatted).toContain("PromptHub 服务未启动或无法连接");
+    expect(formatted).toContain("npm run start");
+  });
+
+  it("extracts json error message from response in createPromptApi", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      statusText: "Bad Request",
+      text: async () => JSON.stringify({ error: { message: "content 不能为空" } }),
+    });
+    globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
+
+    await expect(
+      createPromptApi("http://127.0.0.1:3210", undefined, { content: "" })
+    ).rejects.toThrow("content 不能为空");
+  });
+});

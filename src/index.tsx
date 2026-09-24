@@ -19,6 +19,7 @@ import {
   buildDetailMarkdown,
   clearRecentPrompts,
   deletePromptApi,
+  formatApiError,
   getApiConfig,
   getKindIcon,
   getRecentPrompts,
@@ -226,7 +227,8 @@ export default function Command() {
         }
         setNextCursor(json.nextCursor || null);
       } catch (err: unknown) {
-        const errorObj = err instanceof Error ? err : new Error(String(err));
+        const msg = formatApiError(err, serverUrl);
+        const errorObj = new Error(msg);
         console.error("[PromptHelper] fetch error:", errorObj);
         // 静默后台对齐失败不报错打扰用户
         if (!isSilent) {
@@ -318,7 +320,7 @@ export default function Command() {
           title: "提示词已删除",
         });
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = formatApiError(err, serverUrl);
         await showToast({
           style: Toast.Style.Failure,
           title: "删除失败",
@@ -350,7 +352,7 @@ export default function Command() {
         // 失败回滚
         setPrompts((prev) => prev.map((p) => (p.id === prompt.id ? { ...p, favorited: prompt.favorited } : p)));
         setRecentPrompts((prev) => prev.map((p) => (p.id === prompt.id ? { ...p, favorited: prompt.favorited } : p)));
-        const errMsg = err instanceof Error ? err.message : String(err);
+        const errMsg = formatApiError(err, serverUrl);
         await showToast({
           style: Toast.Style.Failure,
           title: "收藏操作失败",
